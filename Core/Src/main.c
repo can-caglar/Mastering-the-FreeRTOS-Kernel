@@ -51,9 +51,12 @@ osThreadId defaultTaskHandle;
 osThreadId myTask02Handle;
 /* USER CODE BEGIN PV */
 
+#define mainDELAY_LOOP_COUNT 500000
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN PFP */
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
@@ -62,7 +65,40 @@ static void MX_SPI1_Init(void);
 void StartDefaultTask(void const * argument);
 void StartTask02(void const * argument);
 
-/* USER CODE BEGIN PFP */
+void vTask1(void* pvParameters);
+void vTaskTrafficLights(void* pvParameters);
+void vTaskConstant(void* pvParameters);
+
+typedef struct MyLED
+{
+  GPIO_TypeDef *GPIO_Port;
+  uint16_t GPIO_Pin;
+} MyLED;
+
+typedef struct OnOffPeriod
+{
+  TickType_t on;
+  TickType_t off;
+} OnOffPeriod;
+
+typedef struct TrafficLightData
+{
+  MyLED led;
+  OnOffPeriod period;
+  uint8_t start;
+} TrafficLightData;
+
+const MyLED greenLed = {.GPIO_Port = LD4_GPIO_Port, .GPIO_Pin = LD4_Pin};
+const MyLED blueLed = {.GPIO_Port = LD6_GPIO_Port, .GPIO_Pin = LD6_Pin};
+const MyLED orangeLed = {.GPIO_Port = LD3_GPIO_Port, .GPIO_Pin = LD3_Pin};
+const MyLED redLed = {.GPIO_Port = LD5_GPIO_Port, .GPIO_Pin = LD5_Pin};
+
+TrafficLightData redTrafficLight;
+TrafficLightData amberTrafficLight;
+TrafficLightData greenTrafficLight;
+
+void vApplicationIdleHook(void);
+
 
 /* USER CODE END PFP */
 
@@ -104,6 +140,8 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
+
+
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -121,22 +159,42 @@ int main(void)
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
+  
+  #if 0
+  xTaskCreate(vTask1, "vTask1", 100, (void*)&greenLed, 2, NULL);
+  xTaskCreate(vTaskConstant, "vTaskConstant", 100, (void*)&blueLed, 1, NULL);
+  xTaskCreate(vTaskConstant, "vTaskConstant", 100, (void*)&orangeLed, 1, NULL);
+  xTaskCreate(vTaskConstant, "vTaskConstant", 100, (void*)&redLed, 1, NULL);
+  #endif
+  
+  // traffic light app
+  redTrafficLight.led = redLed;
+  redTrafficLight.period.on = 5000;
+  redTrafficLight.period.off = 7000;
+  redTrafficLight.start = 1;
+ 
+  amberTrafficLight.led = orangeLed;
+  amberTrafficLight.period.on = 1000;
+  amberTrafficLight.period.off = 5000;
+  amberTrafficLight.start = 0;
 
-  /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+  greenTrafficLight.led = greenLed;
+  greenTrafficLight.period.on = 6000;
+  greenTrafficLight.period.off = 6000;
+  greenTrafficLight.start = 0;
 
-  /* definition and creation of myTask02 */
-  osThreadDef(myTask02, StartTask02, osPriorityIdle, 0, 128);
-  myTask02Handle = osThreadCreate(osThread(myTask02), NULL);
+  xTaskCreate(vTaskTrafficLights, "redTrafficLight", 100, (void*)&redTrafficLight, 2, NULL);
+  xTaskCreate(vTaskTrafficLights, "amberTrafficLight", 100, (void*)&amberTrafficLight, 2, NULL);
+  xTaskCreate(vTaskTrafficLights, "greenTrafficLight", 100, (void*)&greenTrafficLight, 2, NULL);
+  // end
+  
+  vTaskStartScheduler();
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
-  /* Start scheduler */
-  osKernelStart();
+
 
   /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
@@ -471,19 +529,64 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef  USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
+void vTask1(void* pvParameters)
 {
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
+  MyLED* led = (MyLED*)pvParameters;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  while(1)
+  {
+    HAL_GPIO_WritePin(led->GPIO_Port, led->GPIO_Pin, GPIO_PIN_SET);
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(100));  // vTaskDelay(pdMS_TO_TICKS(100));
+
+    HAL_GPIO_WritePin(led->GPIO_Port, led->GPIO_Pin, GPIO_PIN_RESET);
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(100));  // vTaskDelay(pdMS_TO_TICKS(100));
+  }
 }
-#endif /* USE_FULL_ASSERT */
+
+void vTaskConstant(void* pvParameters)
+{
+  MyLED* led = (MyLED*)pvParameters;
+  while(1)
+  {
+    HAL_GPIO_WritePin(led->GPIO_Port, led->GPIO_Pin, GPIO_PIN_SET);
+    for (int i = 0; i < mainDELAY_LOOP_COUNT; i++)
+    {
+      volatile int a = i;
+    }
+    HAL_GPIO_WritePin(led->GPIO_Port, led->GPIO_Pin, GPIO_PIN_RESET);
+    for (int i = 0; i < mainDELAY_LOOP_COUNT; i++)
+    {
+      volatile int a = i;
+    }
+  }
+}
+
+void vTaskTrafficLights(void* pvParameters)
+{
+  TrafficLightData* data = (TrafficLightData*)pvParameters;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  // TickType_t xLastOffTime = xTaskGetTickCount();
+  uint8_t startOn = data->start;
+  while(1)
+  {
+    if (startOn)
+    {
+      HAL_GPIO_WritePin(data->led.GPIO_Port, data->led.GPIO_Pin, GPIO_PIN_SET);
+      vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(data->period.on));
+    }
+    else
+    {
+      startOn = 1; // for next time
+    }
+
+    HAL_GPIO_WritePin(data->led.GPIO_Port, data->led.GPIO_Pin, GPIO_PIN_RESET);
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(data->period.off));
+  }
+}
+
+uint32_t idleCounter = 0;
+
+void vApplicationIdleHook(void)
+{
+  idleCounter++;
+}
