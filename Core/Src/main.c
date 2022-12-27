@@ -2,100 +2,92 @@
 #include "task.h"
 #include "queue.h"
 #include <stdio.h>
+#include <stdlib.h>
 
-/*
-This example creates two sending tasks and one receiving task. The sending tasks send data
-to the receiving task on two separate queues, one queue for each task. The two queues are
-added to a queue set, and the receiving task reads from the queue set to determine which of
-the two queues contain data.
-The tasks, queues, and the queue set, are all created in main()—see Listing 63 for its
-implementation.
-*/
+// One task that continuously reads a mail box
+// and signifies when it detects new data
+// Called at a faster frequency
 
-float myfloat = 1.994f;
+// Another task that continuously overwrites data in mailbox
+// with data
 
 // Tasks
-void sendingTask1(void* vParam);
-void sendingTask2(void* vParam);
-void receivingTask(void* vParam);
+void readMailbox(void* pvParam);
+void writeMailBox(void* pvParam);
 
-xQueueHandle queue1 = NULL;
-xQueueHandle queue2 = NULL;
-xQueueSetHandle queueSet = NULL;
+// Mailbox
+xQueueHandle Mailbox;
+
+// The data will be a struct with a random number and time stamp
+typedef struct
+{
+  uint64_t randomNumber;
+  UBaseType_t time;
+} MyData_s;
+
+MyData_s DataToSend;
 
 int main(void)
 {
-  // Create a queue
-  queue1 = xQueueCreate(5, sizeof(int));
-  queue2 = xQueueCreate(5, sizeof(float));
-  
-  // Create queue set
-  queueSet = xQueueCreateSet(10);
-  
-  // Add queue to set
-  xQueueAddToSet(queue1, queueSet);
-  xQueueAddToSet(queue2, queueSet);
+  // Create mailbox (queue)
+  Mailbox = xQueueCreate(1, sizeof(MyData_s));
   
   // Create tasks
-  xTaskCreate(sendingTask1, "Sending task 1", 0x100, (void*)777, 2, NULL);
-  xTaskCreate(sendingTask2, "Sending task 2", 0x100, (void*)&myfloat, 2, NULL);
-  xTaskCreate(receivingTask, "Recv task", 0x100, NULL, 1, NULL);
+  xTaskCreate(readMailbox, "read", 0x100, NULL, 1, NULL);
+  xTaskCreate(writeMailBox, "write", 0x100, NULL, 1, NULL);
   
-  // Give control over to scheduler
+  // give control over to scheduler
   vTaskStartScheduler();
   
-  while(1)
+  for(;;)
   {
-    printf("Should never reach here!\n");
   }
 }
 
-
-// Sends INT data to a queue set
-void sendingTask1(void* vParam)
+void readMailbox(void* pvParam)
 {
-  int numberToSend = (int)vParam;  // no need to cast
+  // read from mailbox and announce when new item detected!
+  MyData_s receivedData = { 0 };
+  BaseType_t previousTime = 0;
   while(1)
   {
-    xQueueSendToBack(queue1, (void*)&numberToSend, pdMS_TO_TICKS(500));
-    vTaskDelay(1000);
-  }
-}
-
-// Sends FLOAT data to a queue set
-void sendingTask2(void* vParam)
-{
-  float numberToSend = (*(float*)vParam);
-  while(1)
-  {
-    xQueueSendToBack(queue2, (void*)&numberToSend, pdMS_TO_TICKS(500));
-    vTaskDelay(500);
-  }
-}
-
-void receivingTask(void* vParam)
-{
-  while(1)
-  {
-    // init data to be received
-    int numberReceived = 0;
-    float floatReceived = 0.0f;
-    
-    // Receive data from set
-    QueueSetMemberHandle_t member = xQueueSelectFromSet(queueSet, pdMS_TO_TICKS(500));
-    
-    // Parse set
-    if (member == (QueueSetMemberHandle_t)queue1)
+    // Read from mailbox (peek)
+    BaseType_t err = xQueuePeek(Mailbox, &receivedData, pdMS_TO_TICKS(100));
+    if (err == errQUEUE_EMPTY)
     {
-      // received from queue 1. it's known to be available, so a block time of 0 can be used.
-      xQueueReceive(queue1, (void*)&numberReceived, 0);
-      printf("Received from queue 1: %d\n", numberReceived);
+      printf("Mailbox is empty...\n");
     }
-    if (member == (QueueSetMemberHandle_t)queue2)
+    else
     {
-      // received from queue 2. it's known to be available, so a block time of 0 can be used.
-      xQueueReceive(queue2, (void*)&floatReceived, 0);
-      printf("Received from queue 2: %f\n", floatReceived);
+      if (previousTime < receivedData.time)
+      {
+        printf("New item received! Item: %llu\n", receivedData.randomNumber); 
+        previousTime = receivedData.time;
+      }
+      else
+      {
+        printf("Item: %llu\n", receivedData.randomNumber);
+      }
     }
+    
+    // Delay
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
+
+void writeMailBox(void* pvParam)
+{
+  // write to mailbox every so often
+  while(1)
+  {
+    // prep data
+    DataToSend.randomNumber = rand();
+    DataToSend.time = xTaskGetTickCount();
+    
+    // send
+    xQueueOverwrite(Mailbox, (void*)&DataToSend);
+    
+    // delay
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
 }
