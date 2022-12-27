@@ -1,93 +1,51 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "timers.h"
 #include <stdio.h>
 #include <stdlib.h>
 
-// One task that continuously reads a mail box
-// and signifies when it detects new data
-// Called at a faster frequency
+// Creating a one-shot and auto reload timer
 
-// Another task that continuously overwrites data in mailbox
-// with data
+// Create empty timer objects
+TimerHandle_t osTimer;
+TimerHandle_t arTimer;
 
-// Tasks
-void readMailbox(void* pvParam);
-void writeMailBox(void* pvParam);
-
-// Mailbox
-xQueueHandle Mailbox;
-
-// The data will be a struct with a random number and time stamp
-typedef struct
-{
-  uint64_t randomNumber;
-  UBaseType_t time;
-} MyData_s;
-
-MyData_s DataToSend;
+void timerCallback1(TimerHandle_t xTimer);
+void timerCallback2(TimerHandle_t xTimer);
 
 int main(void)
 {
-  // Create mailbox (queue)
-  Mailbox = xQueueCreate(1, sizeof(MyData_s));
+  // Create the timers
+  arTimer = xTimerCreate("Timer 1", pdMS_TO_TICKS(500), 1, NULL, timerCallback1);
+  osTimer = xTimerCreate("Timer 2", pdMS_TO_TICKS(1500), 0, NULL, timerCallback2);
   
-  // Create tasks
-  xTaskCreate(readMailbox, "read", 0x100, NULL, 1, NULL);
-  xTaskCreate(writeMailBox, "write", 0x100, NULL, 1, NULL);
+  // Start them
+  volatile BaseType_t t1started = xTimerStart(arTimer, 0);
+  volatile BaseType_t t2started = xTimerStart(osTimer, 0);
   
-  // give control over to scheduler
-  vTaskStartScheduler();
+  if (t1started && t2started)
+  {
+    // give control over to scheduler
+    vTaskStartScheduler();
+  }
+  else
+  {
+    printf("One of the timers couldnt be started t1 = %lu | t2 = %lu\n", t1started, t2started);
+  }
+  
   
   for(;;)
   {
   }
 }
 
-void readMailbox(void* pvParam)
+void timerCallback1(TimerHandle_t xTimer)
 {
-  // read from mailbox and announce when new item detected!
-  MyData_s receivedData = { 0 };
-  BaseType_t previousTime = 0;
-  while(1)
-  {
-    // Read from mailbox (peek)
-    BaseType_t err = xQueuePeek(Mailbox, &receivedData, pdMS_TO_TICKS(100));
-    if (err == errQUEUE_EMPTY)
-    {
-      printf("Mailbox is empty...\n");
-    }
-    else
-    {
-      if (previousTime < receivedData.time)
-      {
-        printf("New item received! Item: %llu\n", receivedData.randomNumber); 
-        previousTime = receivedData.time;
-      }
-      else
-      {
-        printf("Item: %llu\n", receivedData.randomNumber);
-      }
-    }
-    
-    // Delay
-    vTaskDelay(pdMS_TO_TICKS(200));
-  }
+  printf("Timer callback1 is being called\n");
 }
 
-void writeMailBox(void* pvParam)
+void timerCallback2(TimerHandle_t xTimer)
 {
-  // write to mailbox every so often
-  while(1)
-  {
-    // prep data
-    DataToSend.randomNumber = rand();
-    DataToSend.time = xTaskGetTickCount();
-    
-    // send
-    xQueueOverwrite(Mailbox, (void*)&DataToSend);
-    
-    // delay
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
+  printf("Gundi! The callback2 is being called\n");
 }
