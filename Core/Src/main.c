@@ -3,130 +3,99 @@
 #include "queue.h"
 #include <stdio.h>
 
+/*
+This example creates two sending tasks and one receiving task. The sending tasks send data
+to the receiving task on two separate queues, one queue for each task. The two queues are
+added to a queue set, and the receiving task reads from the queue set to determine which of
+the two queues contain data.
+The tasks, queues, and the queue set, are all created in main()—see Listing 63 for its
+implementation.
+*/
+
+float myfloat = 1.994f;
+
 // Tasks
-void vTask1(void* vParam);
-void vTaskSendToQueue(void* vParam);
-void vTaskReceiveFromQueue(void* vParam);
+void sendingTask1(void* vParam);
+void sendingTask2(void* vParam);
+void receivingTask(void* vParam);
 
-// Generic Data
-const int MyNumbers[] = {100, 200};
-const char* const MyCharacters[] = {"hello", "my", "old", "friend"};
-
-typedef enum TaskId_e
-{
-  TASK1_DATA,
-  TASK2_DATA
-} TaskId_e;
-
-struct Data_s
-{
-  TaskId_e id;
-  void* value;
-} structData[2] =
-{
-  {TASK1_DATA, (void*)&MyNumbers[0]},
-  {TASK2_DATA, (void*)&MyCharacters[0]},
-};
-typedef struct Data_s Data_s;
-
-
-// FreeRTOS Objects
-
-// Queues
-xQueueHandle myQueue;
-
-void Error_Handler()
-{
-  printf("error!\n");
-  while(1)
-  {
-  }
-}
+xQueueHandle queue1 = NULL;
+xQueueHandle queue2 = NULL;
+xQueueSetHandle queueSet = NULL;
 
 int main(void)
 {
-  printf("Program starting...\n");
+  // Create a queue
+  queue1 = xQueueCreate(5, sizeof(int));
+  queue2 = xQueueCreate(5, sizeof(float));
   
-  // Create FreeRTOS objects
-  myQueue = xQueueCreate(5, sizeof(Data_s));
+  // Create queue set
+  queueSet = xQueueCreateSet(10);
   
-  // Task creation
-  xTaskCreate(vTaskSendToQueue, "TaskSend1", 0x100, &structData[0], 2, NULL);
-  xTaskCreate(vTaskSendToQueue, "TaskSend2", 0x100, &structData[1], 2, NULL);
-  xTaskCreate(vTaskReceiveFromQueue, "TaskRecv", 0x100, NULL, 1, NULL);
+  // Add queue to set
+  xQueueAddToSet(queue1, queueSet);
+  xQueueAddToSet(queue2, queueSet);
   
-  // Begin scheduler
+  // Create tasks
+  xTaskCreate(sendingTask1, "Sending task 1", 0x100, (void*)777, 2, NULL);
+  xTaskCreate(sendingTask2, "Sending task 2", 0x100, (void*)&myfloat, 2, NULL);
+  xTaskCreate(receivingTask, "Recv task", 0x100, NULL, 1, NULL);
+  
+  // Give control over to scheduler
   vTaskStartScheduler();
   
-  // should never get to here
-  printf("Entering forever loop!\n");
   while(1)
   {
+    printf("Should never reach here!\n");
   }
 }
 
-void vTask1(void* vParam)
+
+// Sends INT data to a queue set
+void sendingTask1(void* vParam)
 {
-  char* str = (char*)vParam;
+  int numberToSend = (int)vParam;  // no need to cast
   while(1)
   {
-    printf("This is task: %s\n", str);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    xQueueSendToBack(queue1, (void*)&numberToSend, pdMS_TO_TICKS(500));
+    vTaskDelay(1000);
   }
 }
 
-void vTaskSendToQueue(void* vParam)
+// Sends FLOAT data to a queue set
+void sendingTask2(void* vParam)
 {
-  printf("vTaskSendToQueue - Starting sending task...\n");
-  
+  float numberToSend = (*(float*)vParam);
   while(1)
   {
-    BaseType_t err = xQueueSend(myQueue, vParam, pdMS_TO_TICKS(500));
-    if (err != errQUEUE_FULL)
-    {
-      printf("vTaskSendToQueue - Queue is full\n");
-    }
+    xQueueSendToBack(queue2, (void*)&numberToSend, pdMS_TO_TICKS(500));
+    vTaskDelay(500);
   }
 }
 
-void vTaskReceiveFromQueue(void* vParam)
+void receivingTask(void* vParam)
 {
-  printf("vTaskReceiveFromQueue - Starting...\n");
   while(1)
   {
-    // Print info
-    printf("vTaskReceiveFromQueue Items in Q = %lu\n", uxQueueMessagesWaiting(myQueue));
+    // init data to be received
+    int numberReceived = 0;
+    float floatReceived = 0.0f;
     
-    // Receive from queue
-    Data_s dataReceived;
-    BaseType_t err = xQueueReceive(myQueue, &dataReceived, pdMS_TO_TICKS(500));
+    // Receive data from set
+    QueueSetMemberHandle_t member = xQueueSelectFromSet(queueSet, pdMS_TO_TICKS(500));
     
-    // Error checking and logging
-    if (err == pdPASS)
+    // Parse set
+    if (member == (QueueSetMemberHandle_t)queue1)
     {
-      switch (dataReceived.id)
-      {
-        case TASK1_DATA:
-        {
-          printf("vTaskReceiveFromQueue - Received from TASK1, number: %d\n", (*(int*)dataReceived.value));
-        }
-        break;
-        case TASK2_DATA:
-        {
-          printf("vTaskReceiveFromQueue - Received from TASK2, string: %s\n", (*(char**)dataReceived.value));
-        }
-        break;
-        default:
-        {
-          printf("vTaskReceiveFromQueue - Unhandled ID\n");
-        }
-        break;
-      }
-      
+      // received from queue 1. it's known to be available, so a block time of 0 can be used.
+      xQueueReceive(queue1, (void*)&numberReceived, 0);
+      printf("Received from queue 1: %d\n", numberReceived);
     }
-    else
+    if (member == (QueueSetMemberHandle_t)queue2)
     {
-      printf("vTaskReceiveFromQueue - Queue empty and timed out\n");
+      // received from queue 2. it's known to be available, so a block time of 0 can be used.
+      xQueueReceive(queue2, (void*)&floatReceived, 0);
+      printf("Received from queue 2: %f\n", floatReceived);
     }
   }
 }
