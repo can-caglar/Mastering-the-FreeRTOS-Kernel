@@ -23,27 +23,8 @@ void button_init(void)
   HAL_GPIO_Init(GPIOA, &button_pin);
   
   // Enable and set up interrupt
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 6, 0);  // 1 higher than configMAX_SYSCALL_INTERRUPT_PRIORITY as per FreeRTOS rules
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-}
-
-// Define the interrupt service routine (ISR) for the button input
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == GPIO_PIN_0) // Check if the interrupt was triggered by the button pin
-    {
-        // Read the state of the button using the HAL_GPIO_ReadPin() function
-        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
-        {
-          // not pressed
-          volatile int a = 5;
-        }
-        else
-        {
-          // pressed
-          volatile int a = 5;
-        }
-    }
 }
 
 void EXTI0_IRQHandler(void)
