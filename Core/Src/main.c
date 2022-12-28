@@ -1,65 +1,39 @@
-#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
-#include "timers.h"
-#include <stdio.h>
-#include <stdlib.h>
+/*
+Write a program that:
+  Turns on an LED when a button is pressed.
+  The LED remains on for 1 second.
+  If the button is pressed, the time-out for the LED is increased by 1 second again.
+  This is to emulate a backlight of an LCD which stays on and refreshes everytime a button is pressed.
+*/
 
-// Creating a one-shot and auto reload timer
-// but only having 1 timer callback
-// and the auto-reload timer will stop after 5 executions.
-
-// Create empty timer objects
-TimerHandle_t osTimer;
-TimerHandle_t arTimer;
-
-void timerCallback1(TimerHandle_t xTimer);
+#include "cc_led.h"
+#include "cc_button.h"
 
 int main(void)
 {
-  // Create the timers
-  arTimer = xTimerCreate("Timer 1", pdMS_TO_TICKS(500), pdTRUE, 0, timerCallback1);
-  osTimer = xTimerCreate("Timer 2", pdMS_TO_TICKS(1500), pdFALSE, 0, timerCallback1);
+  HAL_Init();
+
+  button_init();
+  led_init();
+ 
+  led_on(RED_LED_PIN);
+  led_on(ORANGE_LED_PIN);
+  led_on(GREEN_LED_PIN);
+  led_on(BLUE_LED_PIN);
   
-  // Start them
-  volatile BaseType_t t1started = xTimerStart(arTimer, 0);
-  volatile BaseType_t t2started = xTimerStart(osTimer, 0);
-  
-  if (t1started && t2started)
+  while(1)
   {
-    // give control over to scheduler
-    vTaskStartScheduler();
-  }
-  else
-  {
-    printf("One of the timers couldnt be started t1 = %lu | t2 = %lu\n", t1started, t2started);
-  }
-  
-  
-  for(;;)
-  {
+    volatile int a = 6;
   }
 }
 
-void timerCallback1(TimerHandle_t xTimer)
-{
-  // Get the ID associated with it
-  int id = (int)pvTimerGetTimerID(xTimer);
-  int newID = id + 1;
-  vTimerSetTimerID(xTimer, (void*)newID);
-  
-  // Discern which timer it is
-  if (xTimer == osTimer)
-  {
-    printf("One shot timer executing! ID: %d\n", id);
-  }
-  else
-  {
-    printf("Auto-reload timer executing! ID: %d\n", id);
-    if (id > 5)
-    {
-      printf("Stopping auto-reload timer\n");
-      xTimerStop(xTimer, pdMS_TO_TICKS(500));
-    }
-  }
-}
+/*
+
+Step 1:
+[ ] Design
+  - Set up interrupt for button
+  - A timer callback to turn off LED
+[ ] LED driver
+[ ] Button driver
+
+*/
