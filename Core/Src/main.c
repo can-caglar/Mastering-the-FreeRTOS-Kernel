@@ -1,9 +1,11 @@
 /*
 Write a program that:
-  Turns on an LED when a button is pressed.
-  The LED remains on for 1 second.
-  If the button is pressed, the time-out for the LED is increased by 1 second again.
-  This is to emulate a backlight of an LCD which stays on and refreshes everytime a button is pressed.
+  Blinks blue LED periodically.
+  
+  When a button is pressed, turns on green LED which will turn off after 500 ms.
+  Every time a button is pressed, the green LED off period will increase.
+  
+  The interrupt shall defer to the daemon task.
 */
 
 #include "cc_led.h"
@@ -20,7 +22,7 @@ SemaphoreHandle_t ledSem = NULL;
 
 // Callbacks and tasks
 void timerLedOffCb(TimerHandle_t xTimer);
-void ledOffTask(void* pvParam);
+void ledOffPendableFunction(void* pvParam, uint32_t ulParam);
 void ledToggleTask(void* pvParam);
   
 int main(void)
@@ -33,12 +35,8 @@ int main(void)
   // Create timer
   ledOffTimer = xTimerCreate("LedOff", pdMS_TO_TICKS(1000), pdFALSE, 0, timerLedOffCb);
   
-  // Create semaphore
-  ledSem = xSemaphoreCreateCounting(3, 0);
-  
   // Create task
-  BaseType_t err = xTaskCreate(ledOffTask, "led off", 0x100, NULL, 2, NULL);
-  err |= xTaskCreate(ledToggleTask, "led toggle", 0x100, NULL, 1, NULL);
+  BaseType_t err = xTaskCreate(ledToggleTask, "led toggle", 0x100, NULL, 1, NULL);
   
   if (err != pdPASS)
   {
@@ -57,13 +55,13 @@ int main(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   BaseType_t xHigherPriorityWoken = pdFALSE;
+  static uint32_t callTime = 0;
   if (GPIO_Pin == GPIO_PIN_0) // Check if the interrupt was triggered by the button pin
   {
     printf("HAL_GPIO_EXTI_Callback - interrupted\n");
-    xSemaphoreGiveFromISR(ledSem, &xHigherPriorityWoken);
-    xSemaphoreGiveFromISR(ledSem, &xHigherPriorityWoken);
-    xSemaphoreGiveFromISR(ledSem, &xHigherPriorityWoken);
-    printf("HAL_GPIO_EXTI_Callback - gave semaphore\n");
+    // send command execution to the Daemon task
+    xTimerPendFunctionCallFromISR(ledOffPendableFunction, NULL, callTime++, &xHigherPriorityWoken);
+    printf("HAL_GPIO_EXTI_Callback - pend function\n");
     portYIELD_FROM_ISR(xHigherPriorityWoken);
   }
 }
@@ -75,25 +73,19 @@ void timerLedOffCb(TimerHandle_t xTimer)
   led_on(ORANGE_LED_PIN);
 }
 
-void ledOffTask(void* pvParam)
+void ledOffPendableFunction(void* pvParam, uint32_t ulParam)
 {
-  printf("ledOffTask - Entering ledOffTask\n");
+  printf("ledOffPendableFunction - Entered %u times\n", ulParam);
  
-  while(1)
+  // turn on green, off orange
+  led_on(GREEN_LED_PIN);
+  led_off(ORANGE_LED_PIN);
+
+  // start led off timer
+  BaseType_t err = xTimerReset(ledOffTimer, pdMS_TO_TICKS(500));
+  if (err != pdPASS)
   {
-    printf("ledOffTask - waiting for semaphore!\n");
-    xSemaphoreTake(ledSem, portMAX_DELAY);
-    printf("ledOffTask - ledSem taken!\n");
-    // turn on green, off orange
-    led_on(GREEN_LED_PIN);
-    led_off(ORANGE_LED_PIN);
- 
-    // start led off timer
-    BaseType_t err = xTimerReset(ledOffTimer, pdMS_TO_TICKS(500));
-    if (err != pdPASS)
-    {
-      printf("ledOffTask - Failed to reset timer from isr\n");
-    }
+    printf("ledOffPendableFunction - Failed to reset timer\n");
   }
 }
 
@@ -107,13 +99,3 @@ void ledToggleTask(void* pvParam)
     vTaskDelayUntil(&thisTick, pdMS_TO_TICKS(150));
   }
 }
-/*
-
-Step 1:
-[ ] Design
-  - Set up interrupt for button
-  - A timer callback to turn off LED
-[ ] LED driver
-[ ] Button driver
-
-*/

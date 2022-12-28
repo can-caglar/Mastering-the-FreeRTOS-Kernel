@@ -136,6 +136,7 @@ standard names. */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
 #define configUSE_QUEUE_SETS 1
 #define configUSE_COUNTING_SEMAPHORES 1
+#define INCLUDE_xTimerPendFunctionCall 1
 // Timers
 #define configUSE_TIMERS 1
 #define configTIMER_TASK_PRIORITY 2
