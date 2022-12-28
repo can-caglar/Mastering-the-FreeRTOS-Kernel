@@ -34,7 +34,7 @@ int main(void)
   ledOffTimer = xTimerCreate("LedOff", pdMS_TO_TICKS(1000), pdFALSE, 0, timerLedOffCb);
   
   // Create semaphore
-  ledSem = xSemaphoreCreateBinary();
+  ledSem = xSemaphoreCreateCounting(3, 0);
   
   // Create task
   BaseType_t err = xTaskCreate(ledOffTask, "led off", 0x100, NULL, 2, NULL);
@@ -60,6 +60,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (GPIO_Pin == GPIO_PIN_0) // Check if the interrupt was triggered by the button pin
   {
     printf("HAL_GPIO_EXTI_Callback - interrupted\n");
+    xSemaphoreGiveFromISR(ledSem, &xHigherPriorityWoken);
+    xSemaphoreGiveFromISR(ledSem, &xHigherPriorityWoken);
     xSemaphoreGiveFromISR(ledSem, &xHigherPriorityWoken);
     printf("HAL_GPIO_EXTI_Callback - gave semaphore\n");
     portYIELD_FROM_ISR(xHigherPriorityWoken);
