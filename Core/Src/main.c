@@ -1,101 +1,105 @@
-/*
-Write a program that:
-  Blinks blue LED periodically.
-  
-  When a button is pressed, turns on green LED which will turn off after 500 ms.
-  Every time a button is pressed, the green LED off period will increase.
-  
-  The interrupt shall defer to the daemon task.
-*/
-
-#include "cc_led.h"
-#include "cc_button.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "timers.h"
 #include "semphr.h"
+#include "queue.h"
 #include <stdio.h>
 
-// Objects
-TimerHandle_t ledOffTimer = NULL;
-SemaphoreHandle_t ledSem = NULL;
+/*
+Demonstrate a gatekeeper task pattern
+  - Uses a queue
+This task will be the only owner of the resource "printf"
+Let other tasks use the gatekeeper to print.
+Use a tick hook function that will print out every 200 ticks something
+*/
 
-// Callbacks and tasks
-void timerLedOffCb(TimerHandle_t xTimer);
-void ledOffPendableFunction(void* pvParam, uint32_t ulParam);
-void ledToggleTask(void* pvParam);
-  
+// Strings to print
+const char* MyStrings[] =
+{
+  "Task 1:    ************************",
+  "Task Tick: ========================",
+};
+
+
+void vTaskPrint1(void* pvParam);  // prints every 100 ms
+void vApplicationTickHook(void);  // will print every FreeRTOS scheduler tick cycle
+
+void vPrintGateKeeper(void* pvParam); // the printing gatekeeper task
+
+QueueHandle_t PrintQue; // queue to hold print values
+
 int main(void)
 {
-  // Init HAL and hardware
-  HAL_Init();
-  button_init();
-  led_init();
+  // Create FreeRTOS objects
+  xTaskCreate(vTaskPrint1, "Print Task 1", 0x100, NULL, 2, NULL);
+  xTaskCreate(vPrintGateKeeper, "Print Gatekeeper", 0x100, NULL, 3, NULL);
   
-  // Create timer
-  ledOffTimer = xTimerCreate("LedOff", pdMS_TO_TICKS(1000), pdFALSE, 0, timerLedOffCb);
-  
-  // Create task
-  BaseType_t err = xTaskCreate(ledToggleTask, "led toggle", 0x100, NULL, 1, NULL);
-  
-  if (err != pdPASS)
+  PrintQue = xQueueCreate(10, sizeof(char*));
+  if (PrintQue == NULL)
   {
-    printf("One of the tasks could not be created\n");
+    printf("PrintQue could not be created!\n");
   }
   
+  // Start scheduler
   vTaskStartScheduler();
   
-  while(1)
+  for (;;)
   {
-    volatile int a = 6;
+    // should never come here
+    printf("Shouldn't come here!");
+    while(1);
   }
 }
 
-// Define the interrupt service routine (ISR) for the button input
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+void vTaskPrint1(void* pvParam)
 {
-  BaseType_t xHigherPriorityWoken = pdFALSE;
-  static uint32_t callTime = 0;
-  if (GPIO_Pin == GPIO_PIN_0) // Check if the interrupt was triggered by the button pin
+  // send to print queue every 100 ms
+  for (;;)
   {
-    printf("HAL_GPIO_EXTI_Callback - interrupted\n");
-    // send command execution to the Daemon task
-    xTimerPendFunctionCallFromISR(ledOffPendableFunction, NULL, callTime++, &xHigherPriorityWoken);
-    printf("HAL_GPIO_EXTI_Callback - pend function\n");
-    portYIELD_FROM_ISR(xHigherPriorityWoken);
+    // send to queue
+    BaseType_t err = xQueueSendToBack(PrintQue, &MyStrings[0], pdMS_TO_TICKS(500));
+    if (err == errQUEUE_FULL)
+    {
+      // would like to print but print que is full. just debug via breakpoints for now
+      volatile int a = 5;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
-void timerLedOffCb(TimerHandle_t xTimer)
+void vPrintGateKeeper(void* pvParam)
 {
-  // on orange, off green
-  led_off(GREEN_LED_PIN);
-  led_on(ORANGE_LED_PIN);
-}
-
-void ledOffPendableFunction(void* pvParam, uint32_t ulParam)
-{
-  printf("ledOffPendableFunction - Entered %u times\n", ulParam);
- 
-  // turn on green, off orange
-  led_on(GREEN_LED_PIN);
-  led_off(ORANGE_LED_PIN);
-
-  // start led off timer
-  BaseType_t err = xTimerReset(ledOffTimer, pdMS_TO_TICKS(500));
-  if (err != pdPASS)
+  char* printMsg = NULL;
+  for (;;)
   {
-    printf("ledOffPendableFunction - Failed to reset timer\n");
+    BaseType_t err = xQueueReceive(PrintQue, &printMsg, pdMS_TO_TICKS(1000));
+    if (err == errQUEUE_EMPTY)
+    {
+      printf("vPrintGateKeeper - nothing to print!");
+    }
+    else
+    {
+      printf("%s\n", printMsg);
+    }
   }
 }
 
-void ledToggleTask(void* pvParam)
+void vApplicationTickHook(void)
 {
-  TickType_t thisTick = xTaskGetTickCount();
-  while(1)
+  // Every 200 ticks, print immediately by sending to front.
+  // Note, this will be called from ISR, so use appropriate functions
+  static uint8_t tickCount = 0;
+  
+  if (tickCount > 200)
   {
-    led_toggle(BLUE_LED_PIN);
-    printf("ledToggleTask - toggled\n");
-    vTaskDelayUntil(&thisTick, pdMS_TO_TICKS(150));
+    // pxHigherPriorityTaskWoken has no effect as Scheduler will be called straight after, so set it to NULL.
+    BaseType_t err = xQueueSendToFrontFromISR(PrintQue, &MyStrings[1], NULL);
+    if (err == errQUEUE_FULL)
+    {
+      // would like to print but print que is full. just debug via breakpoints for now
+      volatile int a = 5;
+    }
+    tickCount = 0;
   }
+  
+  tickCount++;
 }
