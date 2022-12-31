@@ -1,78 +1,101 @@
 #include "FreeRTOS.h"
-#include "task.h"
-#include "semphr.h"
-#include "queue.h"
 #include <stdio.h>
+#include "task.h"
+#include "event_groups.h"
+#include "cc_button.h"
 
 /*
-Demonstrate how a semaphore unblocks only the highest priority task
-that is waiting on it
+This example demonstrates how to:
+- Create an event group.
+- Set bits in an event group from an interrupt service routine.
+- Set bits in an event group from a task.
+- Block on an event group
 */
 
-void vTaskPrint(void* pvParam);  
-void vTaskUnblockSemaphore(void* pvParam);  
+EventGroupHandle_t xMyEventGroup = NULL;
 
-SemaphoreHandle_t xMySemaphore = NULL;
+const EventBits_t buttonPress = (1 << 0);
+const EventBits_t printReady = (1 << 1);
 
-const char* Strings[2] =
-{
-  "HighPriorityTask",
-  "LowPriorityTask",
-};
+void vTaskAllowPrint(void* pvParam);
+void vTaskPrint(void* pvParam);
 
 int main(void)
 {
-  // Create FreeRTOS objects
-  xTaskCreate(vTaskUnblockSemaphore, "Task semph", 0x100, NULL, 2, NULL);
-  xTaskCreate(vTaskPrint, "Task HP", 0x100, (void*)Strings[0], 2, NULL);
-  xTaskCreate(vTaskPrint, "Task LP", 0x100, (void*)Strings[1], 1, NULL);
+  // An event group will be made.
+  // 1 bit will signify a button press,
+  // another bit will signify a task that will be
+  // used to print to console
   
-  xMySemaphore = xSemaphoreCreateBinary();
-
-  if (xMySemaphore  == NULL)
-  {
-    printf("xMySemaphore could not be created!\n");
-  }
+  // Create FreeRTOS structures
+  xMyEventGroup = xEventGroupCreate();
   
-  // Start scheduler
+  // Tasks... Daemon task is set to priority 2, so will preempt these
+  xTaskCreate(vTaskAllowPrint, "Allow Print", 0x100, NULL, 1, NULL);
+  xTaskCreate(vTaskPrint, "Print", 0x100, NULL, 1, NULL);
+  
+  // init hardware which will initialise interrupt
+  button_init();
+  
   vTaskStartScheduler();
   
+  for(;;)
+  {
+    printf("shouldn't come here\n");
+    while(1);
+  }
+}
+
+void vTaskAllowPrint(void* pvParam)
+{
+  // signify that we are ready to print
   for (;;)
   {
-    // should never come here
-    printf("Shouldn't come here!");
-    while(1);
+    xEventGroupSetBits(xMyEventGroup, printReady);
+    vTaskDelay(pdMS_TO_TICKS(2000));
   }
 }
 
 void vTaskPrint(void* pvParam)
 {
-  // grab string to print to identify task
-  char* printStr = (char*)pvParam;
-
+  const EventBits_t moneyEvent = (buttonPress | printReady);
+  static uint8_t timesPrinted = 0;
   for (;;)
   {
-    // Attempt to take semaphore, report if taken or timed out
-    if (xSemaphoreTake(xMySemaphore, pdMS_TO_TICKS(500)))
+    // print as soon as we're ready
+    EventBits_t eventsNow = xEventGroupWaitBits(xMyEventGroup, (buttonPress | printReady), pdTRUE, pdTRUE, pdMS_TO_TICKS(1000));
+    if ((eventsNow & moneyEvent) != moneyEvent)
     {
-      printf("%s: SUCCESSFULLY grabbed semaphore\n", printStr);
+      printf("Timed out waiting for event groups. Flag now = 0x%X\n", eventsNow);
     }
     else
     {
-      printf("%s: FAILED to grab semaphore in time\n", printStr);
+      printf("vTaskPrint - Printing as both events (0x%x) arrived: %u\n", eventsNow, timesPrinted++);
     }
-    // Block 200 ms to go once again afterwards
-    vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 
-void vTaskUnblockSemaphore(void* pvParam)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  for (;;)
+  if (GPIO_Pin == GPIO_PIN_0)  // btn pressed
   {
-    // wait 500 ms and give semaphore each loop
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    xSemaphoreGive(xMySemaphore);
+    static TickType_t tickNow = 0;
+    static TickType_t lastBtnPress = 0;
+    
+    tickNow = xTaskGetTickCountFromISR();
+    
+    if (tickNow > (lastBtnPress + pdMS_TO_TICKS(300)))  // debounce...
+    {
+      tickNow = lastBtnPress;
+      
+      // set event
+      BaseType_t pxHigherPriorityTaskWoken = pdFALSE;
+      xEventGroupSetBitsFromISR(xMyEventGroup, buttonPress, &pxHigherPriorityTaskWoken);
+      
+      if (pxHigherPriorityTaskWoken == pdTRUE)
+      {
+        portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);  // yield to daemon task at the end of ISR call if possible
+      }
+    }
   }
 }
-

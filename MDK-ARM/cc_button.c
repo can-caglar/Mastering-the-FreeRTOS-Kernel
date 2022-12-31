@@ -1,5 +1,4 @@
 // Include the appropriate header files
-#include "stm32f4xx_hal.h"
 #include "cc_button.h"
 
 #define BUTTON_PORT GPIOA
