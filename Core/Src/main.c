@@ -5,38 +5,33 @@
 #include <stdio.h>
 
 /*
-Demonstrate a gatekeeper task pattern
-  - Uses a queue
-This task will be the only owner of the resource "printf"
-Let other tasks use the gatekeeper to print.
-Use a tick hook function that will print out every 200 ticks something
+Demonstrate how a semaphore unblocks only the highest priority task
+that is waiting on it
 */
 
-// Strings to print
-const char* MyStrings[] =
+void vTaskPrint(void* pvParam);  
+void vTaskUnblockSemaphore(void* pvParam);  
+
+SemaphoreHandle_t xMySemaphore = NULL;
+
+const char* Strings[2] =
 {
-  "Task 1:    ************************",
-  "Task Tick: ========================",
+  "HighPriorityTask",
+  "LowPriorityTask",
 };
-
-
-void vTaskPrint1(void* pvParam);  // prints every 100 ms
-void vApplicationTickHook(void);  // will print every FreeRTOS scheduler tick cycle
-
-void vPrintGateKeeper(void* pvParam); // the printing gatekeeper task
-
-QueueHandle_t PrintQue; // queue to hold print values
 
 int main(void)
 {
   // Create FreeRTOS objects
-  xTaskCreate(vTaskPrint1, "Print Task 1", 0x100, NULL, 2, NULL);
-  xTaskCreate(vPrintGateKeeper, "Print Gatekeeper", 0x100, NULL, 3, NULL);
+  xTaskCreate(vTaskUnblockSemaphore, "Task semph", 0x100, NULL, 2, NULL);
+  xTaskCreate(vTaskPrint, "Task HP", 0x100, (void*)Strings[0], 2, NULL);
+  xTaskCreate(vTaskPrint, "Task LP", 0x100, (void*)Strings[1], 1, NULL);
   
-  PrintQue = xQueueCreate(10, sizeof(char*));
-  if (PrintQue == NULL)
+  xMySemaphore = xSemaphoreCreateBinary();
+
+  if (xMySemaphore  == NULL)
   {
-    printf("PrintQue could not be created!\n");
+    printf("xMySemaphore could not be created!\n");
   }
   
   // Start scheduler
@@ -50,56 +45,34 @@ int main(void)
   }
 }
 
-void vTaskPrint1(void* pvParam)
+void vTaskPrint(void* pvParam)
 {
-  // send to print queue every 100 ms
-  for (;;)
-  {
-    // send to queue
-    BaseType_t err = xQueueSendToBack(PrintQue, &MyStrings[0], pdMS_TO_TICKS(500));
-    if (err == errQUEUE_FULL)
-    {
-      // would like to print but print que is full. just debug via breakpoints for now
-      volatile int a = 5;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-}
+  // grab string to print to identify task
+  char* printStr = (char*)pvParam;
 
-void vPrintGateKeeper(void* pvParam)
-{
-  char* printMsg = NULL;
   for (;;)
   {
-    BaseType_t err = xQueueReceive(PrintQue, &printMsg, pdMS_TO_TICKS(1000));
-    if (err == errQUEUE_EMPTY)
+    // Attempt to take semaphore, report if taken or timed out
+    if (xSemaphoreTake(xMySemaphore, pdMS_TO_TICKS(500)))
     {
-      printf("vPrintGateKeeper - nothing to print!");
+      printf("%s: SUCCESSFULLY grabbed semaphore\n", printStr);
     }
     else
     {
-      printf("%s\n", printMsg);
+      printf("%s: FAILED to grab semaphore in time\n", printStr);
     }
+    // Block 200 ms to go once again afterwards
+    vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 
-void vApplicationTickHook(void)
+void vTaskUnblockSemaphore(void* pvParam)
 {
-  // Every 200 ticks, print immediately by sending to front.
-  // Note, this will be called from ISR, so use appropriate functions
-  static uint8_t tickCount = 0;
-  
-  if (tickCount > 200)
+  for (;;)
   {
-    // pxHigherPriorityTaskWoken has no effect as Scheduler will be called straight after, so set it to NULL.
-    BaseType_t err = xQueueSendToFrontFromISR(PrintQue, &MyStrings[1], NULL);
-    if (err == errQUEUE_FULL)
-    {
-      // would like to print but print que is full. just debug via breakpoints for now
-      volatile int a = 5;
-    }
-    tickCount = 0;
+    // wait 500 ms and give semaphore each loop
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    xSemaphoreGive(xMySemaphore);
   }
-  
-  tickCount++;
 }
+
