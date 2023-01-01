@@ -138,6 +138,7 @@ standard names. */
 #define configUSE_COUNTING_SEMAPHORES 1
 #define INCLUDE_xTimerPendFunctionCall 1
 #define configUSE_RECURSIVE_MUTEXES 1
+#define configUSE_TASK_NOTIFICATIONS 1
 // Timers
 #define configUSE_TIMERS 1
 #define configTIMER_TASK_PRIORITY 2
